@@ -1,0 +1,22 @@
+
+Steps:
+1) Generate Disease CUIs
+	MySQL command to generate list of Diseases:
+	select CUI from MRSTY where TUI='T047' INTO OUTFILE 'dysn.txt';
+
+2) Generate a list all metabolites and diseases
+	makeMetaboliteDiseasePairs.pl
+
+3) Reduce the co-occurrence matrix so it is only metabolites and diseases
+	reduceCooccurrenceMatrix.pl 
+
+4) Generate LTC between cardiac arrest and all diseases
+	umls-association-runDataSet.pl pairs/cardiacArrestDisease.pairs scores/metaboliteDiseases_ltc.scores --noorder --lta --measure freq --matrix metaboluteDisease_1975_2015_window8_threshold1 
+
+5) format that output to something more understanding
+	perl scoresToNiceOutput.pl
+
+
+
+
+
