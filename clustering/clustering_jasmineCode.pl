@@ -12,6 +12,7 @@ use Cwd;
 #  vector_file - the file containing word2vec vectors
 #  cl_method - the clustering method to use: rb, rbr, direct, agglo, graph, 
 #                                            bagglo
+#  outputDir - the base directory to place output in 
 #
 # Output:
 #  Outputs to the (and if needed creates) the Results/ subdirectory
@@ -43,13 +44,13 @@ Main();
 sub Main {
     # initialize variables and get arguments
     my $start = time;
-    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui) = GetArgs();
+    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui, $outputDir) = GetArgs();
     my $base_dir = cwd();	
 
     # set up output directories
-    my $cl_soln_dir = CreateSolnDir($base_dir, $cl_method, $target_cui);
-    my $ranking_dir = CreateRankingDir();
-    my $vis_dir = CreateVisDir($target_cui, $cl_method);
+    my $cl_soln_dir = CreateSolnDir($base_dir, $cl_method, $target_cui, $outputDir);
+    my $ranking_dir = CreateRankingDir($outputDir);
+    my $vis_dir = CreateVisDir($target_cui, $cl_method, $outputDir);
     #my $tree_dir = CreateTreeDir();
 
     # read in data from file
@@ -458,9 +459,9 @@ sub ReadLBDData {
 }
 
 sub CreateVisDir {
-    my ($target_cui, $cl_method) = (@_);
+    my ($target_cui, $cl_method, $outDir) = (@_);
 
-    my $vis_dir = 'Results/VisualizationData';
+    my $vis_dir = $outDir.'Results/VisualizationData';
     CreateDir($vis_dir);
 
     my $target_cui_vis_dir = $vis_dir . '/' . $target_cui;
@@ -474,16 +475,17 @@ sub CreateVisDir {
 }
 
 sub CreateRankingDir {
-    my $ranking_dir = 'Results/Rankings';
+    my $outputDir = shift;
+    my $ranking_dir = $outputDir.'Results/Rankings';
     CreateDir($ranking_dir);
     print "Target term rankings will be printed to $ranking_dir\n";
     return $ranking_dir;
 }
 
 sub CreateSolnDir {
-    my ($base_dir, $cl_method, $target_cui) = (@_);
+    my ($base_dir, $cl_method, $target_cui, $outputDir) = (@_);
 
-    my $results_dir = "Results";
+    my $results_dir = $outputDir."Results";
     my $target_cui_dir = $results_dir .'/' . $target_cui;
     my $cl_soln_dir = $target_cui_dir . '/' . $cl_method;
 
@@ -501,23 +503,25 @@ sub GetArgs {
     my $vector_file = $ARGV[2];
     my $cl_method = $ARGV[3];
     my $target_cui = $ARGV[4];
-    &CheckArgv($vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui);
-    return $vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui;
+    my $outputDir = $ARGV[5];
+    &CheckArgv($vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui, $outputDir);
+    return $vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui, $outputDir;
 }
 
 sub CheckArgv {
-    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui) = (@_);
+    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $target_cui, $outputDir) = (@_);
     &CheckNumArgs();
     &CheckVcluster($vcluster_dir);
     &CheckCLMethod($cl_method);
     &CheckFileErr($lbd_file);
     &CheckFileErr($vector_file);
     &CheckCui($target_cui);
+    &CheckOutputDir($outputDir);
 }
 
 sub CheckNumArgs {
-    if ($#ARGV < 4) {
-	print "Incorrect number of arguments. Program requires 5 arguments to run.\n";
+    if ($#ARGV <5) {
+	print "Incorrect number of arguments. Program requires 6 arguments to run.\n";
 	print "Usage: perl DiscoveryReplication.pl [vcluster_dir] [ltc_file] [vector_file] [cl_method] [target_cui]\n";
 	exit;
     }
@@ -557,3 +561,10 @@ sub CheckCui {
 	exit;
     }
 }
+
+sub CheckOutputDir {
+    my $outputDir = shift;
+    #TODO check something?
+    return;
+}
+

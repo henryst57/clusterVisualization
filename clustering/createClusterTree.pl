@@ -2,7 +2,7 @@
 use strict;
 use warnings;
 
-# usage: perl createClusterTree.pl [vcluster_dir] [lbd_file] [vector_file] [cl_method] [out_file]
+# usage: perl createClusterTree.pl [vcluster_dir] [lbd_file] [vector_file] [cl_method] [out_dir] [parent_array_out] [clusters_file_out]
 # example: perl createClusterTree.pl ../cluto-2.1.1/Linux/ ../data/rayFish_ltc_threshold_targetTermList ../data/1983_1985_window8 rb output/rayFish_clusterTree
 #
 # Input Parameters:
@@ -11,11 +11,12 @@ use warnings;
 #  vector_file - the file containing word2vec vectors
 #  cl_method - the clustering method to use: rb, rbr, direct, agglo, graph, 
 #                                            bagglo
-#  out_file - the file to output the cluster tree to
-#
+#  output_dir - the directory to output clustering results to
+#  parent_array_out - the output fileName of the parent array
+#  clusters_file_out - the output fileName of the clusters file
 #
 # Output:
-#  
+#  The parent array and the clusters file out. These are formatted as TODO
 #
 #
 
@@ -32,9 +33,8 @@ Main();
 sub Main {
 
     #get the input parameters
-    my $output_dir = 'output/';
+    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $output_dir, $parent_array_out, $clusters_file_out) = GetArgs();
     &CreateDir($output_dir);
-    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $out_file) = GetArgs();
    
     # read in data from file
     print STDERR "   Reading Input File\n";
@@ -45,27 +45,30 @@ sub Main {
     # run clustering	
     print STDERR "   Clustering\n";
     my $v_ifile = PrintVClusterInputFile($vectors, $vector_file, $output_dir, $matrix_size);
-    (my $clusters_file, my $tree_file) = RunVCluster(
-	$output_dir, $vcluster_dir, $v_ifile, $cl_method, $matrix_size);
+    (my $clusters_file) = RunVCluster(
+	$output_dir, $parent_array_out, $vcluster_dir, $v_ifile, $cl_method, $matrix_size);
 
     #cluster labelling and scoring
-    print STDERR "Labelling Clusters\n";
-    my $clusters = ExtractTree($tree_file, $cui_list);
+    print STDERR "Labeling Clusters\n";
+    my $clusters = ExtractTree($parent_array_out, $cui_list);
     my $centroids = CalculateCentroids($vectors, $clusters, $cui_list, $matrix_size);
     my $cluster_names = LabelClusters($centroids, $clusters, $vectors, $cui_terms, $cui_list);
 
     #rank the clusters
-    print STDERR "Calcualting Cluster Scores\n";
+    print STDERR "Calculating Cluster Scores\n";
     my $cluster_scores = CalculateClusterScores($cui_scores, $clusters);
 
     #print out the cluster info
     print STDERR "Outputting Results\n";
-    open OUT, ">$out_file" or die ("ERROR: cannot open out_file: $out_file\n");
+    open OUT, ">$clusters_file_out" or die ("ERROR: cannot open out_file: $clusters_file_out\n");
     foreach my $clusterID (keys %{$clusters}) {
-	print OUT "$clusterID - ${$cluster_names}{$clusterID} - ${$cluster_scores}{$clusterID}: ";
+	print OUT "$clusterID\t${$cluster_names}{$clusterID}\t${$cluster_scores}{$clusterID}\t";
+	my $cuisString = '';
 	foreach my $cui (@{${$clusters}{$clusterID}}) {
-	    print OUT "$cui, "
+	    $cuisString .= "$cui,";
 	}
+	chop $cuisString;
+	print OUT $cuisString;
 	print OUT "\n";
     }
 
@@ -362,7 +365,7 @@ sub PrintVClusterInputFile {
 
 #runs Vcluster and outputs the clusters and the clusters tree
 sub RunVCluster {
-    my ($output_dir, $vcluster_dir, $v_ifile, $cl_method, $matrix_size) = (@_);
+    my ($output_dir, $tree_filename, $vcluster_dir, $v_ifile, $cl_method, $matrix_size) = (@_);
 
     #We want a cluster tree where each leaf node is a vector
     # thereby creating a full cluster tree. SO num_clusters = num_vectors
@@ -372,7 +375,7 @@ sub RunVCluster {
     #create file names
     my $file_to_cluster = $output_dir.$v_ifile;
     my $clusters_filename = $file_to_cluster.'.clusters';
-    my $tree_filename =  $file_to_cluster.'.tree';
+    #my $tree_filename =  $file_to_cluster.'.tree';
     my $labels_filename = $file_to_cluster.'labels';
 
     #NOTE: the labeltree option labels with a set of features, not a single name
@@ -382,7 +385,7 @@ sub RunVCluster {
     print "$cmd\n";
     my $cluster_cmd = `$cmd`;
 
-    return $clusters_filename, $tree_filename;
+    return $clusters_filename;
 }
 
 
@@ -405,25 +408,35 @@ sub GetArgs {
     my $lbd_file = $ARGV[1];
     my $vector_file = $ARGV[2];
     my $cl_method = $ARGV[3];
-    my $out_file = $ARGV[4];
-    &CheckArgv($vcluster_dir, $lbd_file, $vector_file, $cl_method, $out_file);
-    return $vcluster_dir, $lbd_file, $vector_file, $cl_method, $out_file;
+    my $output_dir = $ARGV[4];
+    my $parent_array_out = $ARGV[5];
+    my $clusters_file_out = $ARGV[6];
+    $parent_array_out = $output_dir.$parent_array_out;
+    $clusters_file_out = $output_dir.$clusters_file_out;
+    &CheckArgv($vcluster_dir, $lbd_file, $vector_file, $cl_method, $output_dir, $parent_array_out, $clusters_file_out);
+    return $vcluster_dir, $lbd_file, $vector_file, $cl_method, $output_dir, $parent_array_out, $clusters_file_out;
 }
 
+
+
 sub CheckArgv {
-    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $out_file) = (@_);
+    my ($vcluster_dir, $lbd_file, $vector_file, $cl_method, $output_dir, $parent_array_out, $clusters_file_out) = (@_);
     &CheckNumArgs();
     &CheckVcluster($vcluster_dir);
     &CheckCLMethod($cl_method);
     &CheckFileErr($lbd_file);
     &CheckFileErr($vector_file);
-    &CheckCreateFileErr($out_file);
+    &CheckOutputDir($output_dir);
+    &CreateDir($output_dir);
+  
+    &CheckCreateFileErr($parent_array_out);
+    &CheckCreateFileErr($clusters_file_out);
 }
 
 sub CheckNumArgs {
-    if ($#ARGV < 4) {
-	print "Incorrect number of arguments. Program requires 5 arguments to run.\n";
-	print "Usage: perl DiscoveryReplication.pl [vcluster_dir] [lbd_file] [vector_file] [cl_method] [out_file]\n";
+    if ($#ARGV != 6) {
+	print "Incorrect number of arguments. Program requires 7 arguments to run.\n";
+	print "Usage: perl DiscoveryReplication.pl [vcluster_dir] [lbd_file] [vector_file] [cl_method] [out_dir] [parent_array_out] [clusters_file_out]\n";
 	exit;
     }
 }
@@ -461,6 +474,13 @@ sub CheckCreateFileErr {
     close OUT;
 }
 
+sub CheckOutputDir {
+    my $output_dir = shift;
+    #do something?
+    
+    return;
+}
+
 sub CreateDir {
     # checks if dir exists. if not, creates dir.
     my ($dir) = (@_);
@@ -468,3 +488,5 @@ sub CreateDir {
 	mkdir $dir;
     }
 }
+
+
