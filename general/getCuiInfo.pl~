@@ -1,5 +1,0 @@
-# gets Cui Info
-use strict;
-use warnings;
-
-use UMLS::Interface;

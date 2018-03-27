@@ -14,7 +14,7 @@ my $parentArrayOut = 'RayFish_parentArray';
 my $clustersFileOut = 'RayFish_clusters';
 my $cuiInfoFileOut = 'RayFish_cuiInfo';
 
-my $command = "perl clustering/createClusterTree.pl $vclusterDir $lbdFile $vectorFile $clusterMethod $outputDir $parentArrayOut $clustersFileOut";
+my $command = "perl clustering/createVisualizationOutput.pl $vclusterDir $lbdFile $vectorFile $clusterMethod $outputDir $parentArrayOut $clustersFileOut";
 print "$command\n";
 #`$command`;
 
