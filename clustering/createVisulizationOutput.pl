@@ -1,7 +1,4 @@
 #!/usr/bin/perl
-use strict;
-use warnings;
-
 # usage: perl createClusterTree.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [outDir] [parentArrayOut] [clustersFileOut]
 # example: TODO update example
 #
@@ -14,6 +11,10 @@ use warnings;
 #  vclusterLocation - the location of the CLUTO vcluster executable script
 #  clMethod - the clustering method to use: rb, rbr, direct, agglo, graph, bagglo
 #
+#  # scoring params:
+#  assocMeasure - string indicating the association measure to use (e.g. x2, ll, etc)
+#  cooccurrenceMatrix - the location of the association matrix used in calculating association scores 
+#
 #  # output params:
 #  outputDir - the directory to output clustering results to
 #  parentArrayOut - the output fileName of the parent array
@@ -25,6 +26,12 @@ use warnings;
 #
 #TODO - vector file format?  well its word2vec format
 #TODO - finalize doucmentation (methods are done, but how to use should be documented more)
+use strict;
+use warnings;
+
+use UMLS::Association;
+
+
 
 Main();
 
@@ -39,11 +46,11 @@ Main();
 sub Main {
 
     #get the input parameters
-    my ($vclusterLocation, $lbdFile, $vectorFile, $clMethod, $outputDir, $parentArrayOut, $clustersFileOut) = GetArgs();
-   
+    my ($vclusterLocation, $lbdFile, $vectorFile, $clMethod, $assocMeasure, $cooccurrenceMatrix, $outputDir, $parentArrayOut, $clustersFileOut) = &getArgs();
+
     # read in data from file, since all cuis may not have a vector, the ogCuiList may be different from the cuiList
     print STDERR "   Reading Input File\n";
-    my ($ogCuiList, $cuiScores, $cuiTerms) = &readLBDData($lbdFile);
+    my ($startingCuis, $ogCuiList, $cuiScores, $cuiTerms) = &readLBDData($lbdFile);
     my ($vectors, $cuiList) = &extractVectors($ogCuiList, $vectorFile);
     my $matrixSize = &getMatrixSize($vectors);
 
@@ -61,16 +68,14 @@ sub Main {
 
     # score the clusters
     print STDERR "Calculating Cluster Scores\n";
-    my $nodeScores = &calculateNodeScores($cuiScores, $clusters);
-    my $clusterWeights = &calculateClusterWeights();
-    my $edgeWeights = &calculateEdgeWeights();
-
+    my $nodeScores = &calculateScores_setAssociation($clusters, $startingCuis, $assocMeasure, $cooccurrenceMatrix);
+    my $edgeScores = &calculateScores_sumOfDescendantScores($nodeScores, $clusters, $parentArrayOut);
 
     # print out the cluster info (clusterID, clusterLabel, clusterWeigt, edgeWeight, cuisInCluster)
     print STDERR "Outputting Results\n";
     open OUT, ">$clustersFileOut" or die ("ERROR: cannot open outFile: $clustersFileOut\n");
     foreach my $clusterID (keys %{$clusters}) {
-	print OUT "$clusterID\t${$clusterLabels}{$clusterID}\t${$clusterWeights}{$clusterID}\t${$edgeWeights}{$clusterID}\t";
+	print OUT "$clusterID\t${$clusterLabels}{$clusterID}\t${$nodeScores}{$clusterID}\t${$edgeScores}{$clusterID}\t";
 	my $cuisString = '';
 	foreach my $cui (@{${$clusters}{$clusterID}}) {
 	    $cuisString .= "$cui,";
@@ -88,7 +93,7 @@ sub Main {
 ########################################
 # Cluster Scoring
 ########################################
-#calculates the cluster as the sum of all leaf node scores
+# Calculates the cluster as the sum of all leaf node scores
 # Input:  $cuiScores - a hash ref of the LBD scores of each cui ($cuiScores{$cui}=$score)
 #         $clusters- a hash ref of clusters and their cuis ($clusters{$id}=@cuis)
 # Output: \%clusterScores - a hash ref of scores for each cluster ($clusterScores{$id}=$score)
@@ -104,8 +109,9 @@ sub calculateScores_sumOfLeafNodes {
     }
     return \%clusterScores;
 }
+#Note: No longer used
 
-#calculates the cluster as the sum of all descendant node scores
+# Calculates the cluster as the sum of all descendant node scores
 # remember, a node score is seperate from the cluster score. Those
 # are passed in. In this case, the node score is the set association
 # of that cluster and the starting term. This is precalculated and 
@@ -131,6 +137,7 @@ sub calculateScores_sumOfDescendantNodes {
     return \%cluster_scores;
 }
 
+# Recursively sums all descendant scores of a node
 # Input:  $nodeID - the ID of the current node (in recursion) 
 #         $nodeScoresRef - a hash ref containing the scores of each node (%nodeScores{id}=score)
 #         $childrenListRef - a hash ref containing the children of each node (%children{id}=\@childNodeIDs)
@@ -140,7 +147,6 @@ sub sumDescendantScores {
     my $nodeScoresRef = shift;
     my $childrenListRef = shift;
 
-    #TODO - I'm pretty sure this is wrong. When should I be adding the score?
     #sum the score of all descendants recursively
     my $score = 0;
     foreach my $childrenArray (keys ${$childrenListRef}{$nodeID}) {
@@ -156,30 +162,56 @@ sub sumDescendantScores {
 
 # calculates the score of each node as the set association between it and the starting set
 # Input:  $clusters - a hash ref of clusters and their cuis (clusters{id}=@cuis)
-#         $aTerms - an array ref of CUIs that are the A terms in LBD
+#         $aTermsRef - an array ref of CUIs that are the A terms in LBD
+#         $measure - the association measure to use (e.g. x2, ll, etc..)
 # Output: \%nodeScores - a hash ref of scores for each node (%nodeScores{$id}=$score)
-sub calcuateScores_setAssociation {
+sub calculateScores_setAssociation {
     my $clusters = shift;
-    my @aTermsRef = shift;
-    #TODO, UMLSAssociation
-
-    my $aTermsString = '';
-    #TODO, calculate A terms string or something
+    my $aTermsRef = shift;
+    my $measure = shift;
+    my $cooccurrenceMatrix = shift;
     
-    my %nodeScores = ();
-    foreach my $clusterIndex (keys %$clusters){
-	$nodeScores{$clusterIndex} = 1;
+    #initialize UMLS::Association
+    my %tHash = ();
+    $tHash{'t'} = 1; #default hash values are with t=1 (silence module output)
+    $tHash{'vsa'} = 1; #always use overlapping B sets association, since it is implicit
+    $tHash{'matrix'} = $cooccurrenceMatrix;
+    $tHash{'noOrder'} = 1;
+    my $componentOptions = \%tHash;
+    my $association = UMLS::Association->new($componentOptions) or 
+	die "Error: Unable to create UMLS::Association object.\n";
+    #TODO - options{'uml'} = interface; (is that needed?)
 
-	my $setC = '';
-	foreach my $cui (@{$clusters->{$clusterIndex}}){
-	    $setC .= '$cui,';
-	}
 
-	$nodeScores{$clusterIndex} = 1; #association($setA, $setC);
+    #create set pair lists for a to all nodes in the dataset
+    # the set pair list is what is passed to UMLS::Association
+    # it is two parallel arrays, the A terms, and each node set
+    # UMLS::Association then returns the the set associations between
+    # the A to C pair at each index
+    my @cuis1 = ();
+    my @cuis2 = ();
+    my @order = ();
+    foreach my $clusterKey (keys %{$clusters}) {
+	my $cTermsRef = ${$clusters}{$clusterKey};
+	push @cuis1, $aTermsRef;
+	push @cuis2, $cTermsRef;
+	push @order, $clusterKey;
     }
 
+    #calculate the assocaitions
+    my $scoresRef = $association->calculateAssociation_setPairList(\@cuis1,\@cuis2,$measure);
+
+    #assign each node its calculated score
+    my %nodeScores = ();
+    for (my $i = 0; $i < scalar @order; $i++) {
+	$nodeScores{$order[$i]} = ${$scoresRef}[$i];
+    }
+
+    #return the node scores
     return \%nodeScores;
 }
+
+
 
 
 ########################################
@@ -236,7 +268,7 @@ sub extractClusters {
     my $cuiList = shift;
     
     #get the children list from the tree file
-    my $childrenListRef = ExtractChildrenList($parentFile);
+    my $childrenListRef = &extractChildrenList($parentFile);
 
     #convert the children list to a list of concepts in each cluster
     my %clusters = ();
@@ -299,22 +331,31 @@ sub getChildCuiIDs {
 sub calculateCentroids {
     my ($vectors, $clusters, $cuiList, $matrixSize) = (@_);
     my %centroids;
-    #my %cuiList = reverse %$cuiList;
+    my %cuiList = reverse %{$cuiList}; #makes the cui list a hash{cui}=index rather than hash{key}=index
     my $numColumns = @$matrixSize[1];
 
-    foreach my $clusterIndex (keys %$clusters){ # iterate through clusters
-	my $vectorsPerCluster = 0; # counter for vectors per cluster
-	$centroids{$clusterIndex} = [(0) x $numColumns]; # centroid values: initialize array of size num_columns to 0
-	foreach my $cui (@{$clusters->{$clusterIndex}}){ # for each cui within the cluster
-	    $vectorsPerCluster++; # increment vectors per cluster
-	    my $index = ${$cuiList}{$cui};
+    #find the centroid of each cluster
+    foreach my $clusterIndex (keys %$clusters){
+	#initialize array of size num_columns to 0
+	$centroids{$clusterIndex} = [(0) x $numColumns]; 
+
+	#sum vectors of each cui in the cluster
+	my $vectorsPerCluster = 0;
+	foreach my $cui (@{$clusters->{$clusterIndex}}){
+
+	    #get this cui's vector
+	    my $index = $cuiList{$cui};
 	    my @vector = @{$vectors->{$index}}; # get vector values from vectors hash
-	    foreach my $col (0 .. $numColumns-1){ # add vector to centroid values for cluster
-		$centroids{$clusterIndex}[$col] += $vector[$col]; # sum the values at each column
+	    
+	    #component-wise summation of the vector
+	    foreach my $col (0 .. $numColumns-1){
+		$centroids{$clusterIndex}[$col] += $vector[$col];
 	    }
+	    $vectorsPerCluster++;
 	}
+	#component-wise average over summation
 	foreach my $col (0.. $numColumns-1){
-	    $centroids{$clusterIndex}[$col] /= $vectorsPerCluster; # take the average value over num vectors per cluster
+	    $centroids{$clusterIndex}[$col] /= $vectorsPerCluster;
 	}
     }
     return \%centroids;
@@ -385,16 +426,26 @@ sub calculateCosSim {
 
 # Reads in the LBD target term fileName
 # Input:  $lbdFile - the file containing LBD output (lbd target term file)
-# Output: \%cuiList - a hash ref of cui indeces (%cuiList{$cui}=$index)
+# Output: \@startingCuis - an array ref of statrting cuis (@startingCuis[i]=$cui)
+#         \%cuiList - a hash ref of cui indeces (%cuiList{$cui}=$index)
 #         \%cuiScores - a hash ref of target term scores ($cuiScores{$cui}=$score)
 #         \%cuiTerms - a hash ref of preferred terms ($cuiTerms{$cui}=$term)
 sub readLBDData {
     my ($lbdFile) = (@_);
+    my @startingCuis = ();
     my %cuiList;
     my %cuiScores;
     my %cuiTerms;
     open my $fh, '<', "$lbdFile" or die "Can't open $lbdFile: $!";
     while (my $line = <$fh>) {
+	#grab starting cuis
+	if ($line =~ /startCuis -> /) {
+	    while ($line =~ /(C\d{7})/g) {
+		push @startingCuis, $1;
+	    }
+	}
+
+	#grab target cui info
 	if ($line =~ /(\d+)\t(\d+.?\d*)\t(C\d{7})\t(.+)/){
 	    my $index = $1 - 1;
 	    my $score = $2;
@@ -410,7 +461,7 @@ sub readLBDData {
 	print "Invalid data in ltc file: $lbdFile.\n";
 	exit;
     }
-    return \%cuiList, \%cuiScores, \%cuiTerms;
+    return \@startingCuis, \%cuiList, \%cuiScores, \%cuiTerms;
 }
 #NOTE: if we don't want to use LBD output, then we can get terms from elsewhere, and we don't actually use the individual cui scores anymore
 
@@ -542,24 +593,28 @@ sub getArgs {
     my $lbdFile = $ARGV[1];
     my $vectorFile = $ARGV[2];
     my $clMethod = $ARGV[3];
-    my $outputDir = $ARGV[4];
-    my $parentArrayOut = $ARGV[5];
-    my $clustersFileOut = $ARGV[6];
-    $parentArrayOut = $outputDir.$parentArrayOut;
-    $clustersFileOut = $outputDir.$clustersFileOut;
-
+    my $assocMeasure = $ARGV[4];
+    my $cooccurrenceMatrix = $ARGV[5];
+    my $outputDir = $ARGV[6];
+    my $parentArrayOut = $ARGV[7];
+    my $clustersFileOut = $ARGV[8];
+  
     #check the input args
     &checkNumArgs();
     &checkVcluster($vclusterLocation);
     &checkCLMethod($clMethod);
+    &checkAssocMeasure($assocMeasure);
+    &checkFileErr($cooccurrenceMatrix);
     &checkFileErr($lbdFile);
     &checkFileErr($vectorFile);
     &createDir($outputDir);
+    $parentArrayOut = $outputDir.$parentArrayOut;
     &checkCreateFileErr($parentArrayOut);
+    $clustersFileOut = $outputDir.$clustersFileOut;
     &checkCreateFileErr($clustersFileOut);
 
     #return the input arguments
-    return $vclusterLocation, $lbdFile, $vectorFile, $clMethod, $outputDir, $parentArrayOut, $clustersFileOut;
+    return $vclusterLocation, $lbdFile, $vectorFile, $clMethod, $assocMeasure, $cooccurrenceMatrix, $outputDir, $parentArrayOut, $clustersFileOut;
 }
 
 
@@ -567,9 +622,9 @@ sub getArgs {
 # Input:  none
 # Output: none
 sub checkNumArgs {
-    if ($#ARGV != 6) {
-	print "Incorrect number of arguments. Program requires 7 arguments to run.\n";
-	print "Usage: perl DiscoveryReplication.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [outDir] [parentArrayOut] [clustersFileOut]\n";
+    if ($#ARGV != 8) {
+	print "Incorrect number of arguments. Program requires 9 arguments to run.\n";
+	print "Usage: perl DiscoveryReplication.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [assocMeasure] [cooccurrenceMatrix] [outDir] [parentArrayOut] [clustersFileOut]\n";
 	exit;
     }
 }
@@ -598,6 +653,20 @@ sub checkCLMethod {
     }
 }
 
+# Checks if the associasion measure is correctly specified
+# Input: $assocMeasure - string specifying the association measure
+# Output: none
+sub checkAssocMeasure {
+    my $assocMeasure = shift;
+    my @validAssocMeasures = ('freq', 'dice', 'leftFisher', 'rightFisher', 'twoTailed', 'jaccard', 'll', 'tmi', 'odds', 'pmi', 'phi', 'x2', 'ps', 'tscore');
+    if (!(grep /$assocMeasure/, @validAssocMeasures)) {
+	print "Invalid association measure. Supported options are ".join(', ',@validAssocMeasures)."\n";
+	print "See UMLS::Association --help for information\n";
+	exit;
+    }
+
+}
+
 # Checks if input files are correct
 # Input:  $file - the file to check if it exists and is a file
 # Output: none
@@ -624,7 +693,8 @@ sub checkCreateFileErr {
 sub createDir {
     my ($dir) = (@_);
     # check if dir exists, and if its a dir.
-    my $made = (! -e $dir || ! -d $dir);
+    my $made = (-e $dir || -d $dir);
+    
     #create the dir if needed
     if (!$made) {
 	$made = mkdir $dir;
