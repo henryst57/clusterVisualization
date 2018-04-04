@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# usage: perl createClusterTree.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [outDir] [parentArrayOut] [clustersFileOut]
+# usage: perl createClusterTree.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [outDir] [nodeInfoFileOut] [clusterInfoFileOut]
 # example: TODO update example
 #
 # Input Parameters:
@@ -17,8 +17,8 @@
 #
 #  # output params:
 #  outputDir - the directory to output clustering results to
-#  parentArrayOut - the output fileName of the parent array
-#  clustersFileOut - the output fileName of the clusters file
+#  nodeInfoFileOut - the output fileName of the node (cluster) info file
+#  edgeInfoFileOut - the output fileName of the edge info file
 #
 # Output:
 #  The parent array and the clusters file out. These are formatted as TODO, describe IO
@@ -29,6 +29,7 @@
 use strict;
 use warnings;
 
+use lib '/home/henryst/associationMatrix/UMLS-Assoc_new/UMLS-Association/lib';
 use UMLS::Association;
 
 
@@ -46,36 +47,77 @@ Main();
 sub Main {
 
     #get the input parameters
-    my ($vclusterLocation, $lbdFile, $vectorFile, $clMethod, $assocMeasure, $cooccurrenceMatrix, $outputDir, $parentArrayOut, $clustersFileOut) = &getArgs();
+    my ($vclusterLocation, $lbdFile, $vectorFile, $clMethod, $assocMeasure, $cooccurrenceMatrix, $outputDir, $nodeInfoFileOut, $edgeInfoFileOut) = &getArgs();
 
     # read in data from file, since all cuis may not have a vector, the ogCuiList may be different from the cuiList
-    print STDERR "   Reading Input File\n";
+    print STDERR "---Reading Input File\n";
     my ($startingCuis, $ogCuiList, $cuiScores, $cuiTerms) = &readLBDData($lbdFile);
     my ($vectors, $cuiList) = &extractVectors($ogCuiList, $vectorFile);
     my $matrixSize = &getMatrixSize($vectors);
 
     # run clustering	
-    print STDERR "   Clustering\n";
+    print STDERR "---Clustering\n";
     my $vectorInputFile = &printVClusterInputFile($vectors, $vectorFile, $outputDir, $matrixSize);
-    (my $clustersFile) = &runVCluster(
-	$outputDir, $parentArrayOut, $vclusterLocation, $vectorInputFile, $clMethod, $matrixSize);
+    (my $clustersFile, my $parentArrayFile) = &runVCluster(
+	$outputDir, $vclusterLocation, $vectorInputFile, $clMethod, $matrixSize);
 
     # cluster labeling
-    print STDERR "Labeling Clusters\n";
-    my $clusters = &extractClusters($parentArrayOut, $cuiList);
+    print STDERR "---Labeling Clusters\n";
+    my $clusters = &extractClusters($parentArrayFile, $cuiList);
     my $centroids = &calculateCentroids($vectors, $clusters, $cuiList, $matrixSize);
     my $clusterLabels = &labelClusters($centroids, $clusters, $vectors, $cuiTerms, $cuiList);
 
     # score the clusters
-    print STDERR "Calculating Cluster Scores\n";
+    print STDERR "---Calculating Cluster Scores\n";
     my $nodeScores = &calculateScores_setAssociation($clusters, $startingCuis, $assocMeasure, $cooccurrenceMatrix);
-    my $edgeScores = &calculateScores_sumOfDescendantScores($nodeScores, $clusters, $parentArrayOut);
+    my $edgeScores = &calculateScores_sumOfDescendantScores($nodeScores, $clusters, $parentArrayFile);
 
-    # print out the cluster info (clusterID, clusterLabel, clusterWeigt, edgeWeight, cuisInCluster)
-    print STDERR "Outputting Results\n";
-    open OUT, ">$clustersFileOut" or die ("ERROR: cannot open outFile: $clustersFileOut\n");
+    print STDERR "---Outputting Results\n";
+    &outputResults($edgeInfoFileOut, $nodeInfoFileOut, $parentArrayFile, $clusters, $clusterLabels, $nodeScores, $edgeScores);
+    print STDERR "Done!\n";
+}
+
+
+# Outputs the results of clustering to a node info and edge info file
+# Input: $edgeInfoFileOut - file to output edge info to 
+#        $nodeInfoFileOut - file to output node info to
+#        $parentArrayFile - file containing the parent info
+#        $clusters - hash ref of cuis in a cluster ($clusters{$id}=\@cuis, where \@cuis[$i]=$cui)
+#        $clusterLabels - hash ref of clusters and their labels ($clusterLabels{$id}=$label)
+#        $nodeScores - hash ref of cluster scores ($scores{$id}=$score)
+#        $edgeScores - hash ref of edge scores ($scores{$id}=$score), the edge score
+#                      is the input edge to a node (i.e. node to parent edge)
+# Output: none
+sub outputResults {
+    my $edgeInfoFileOut = shift;
+    my $nodeInfoFileOut = shift;
+    my $parentArrayFile = shift;
+    my $clusters = shift;
+    my $clusterLabels = shift;
+    my $nodeScores = shift;
+    my $edgeScores = shift;
+
+    #read in the parent array
+    open IN, $parentArrayFile or die ("ERROR: can't open parentArrayFile: $parentArrayFile\n");
+    my @parents = ();
+    while (my $line = <IN>) {
+	my @vals = split (/ /, $line);
+	push @parents, $vals[0];
+    }
+    close IN;
+
+    # print out the edge info: parent \t edgeScore
+    open OUT, ">$edgeInfoFileOut" or die ("ERROR: cannot open edgeInfoFileOut: $edgeInfoFileOut\n");
+    for (my $id = 0; $id < scalar @parents; $id++) {
+	print OUT "$parents[$id]\t${$edgeScores}{$id}\n";
+    }
+    close OUT;
+
+
+    # print out the node (cluster) info: clusterID \t clusterLabel \t clusterWeigt \t cuisInCluster
+    open OUT, ">$nodeInfoFileOut" or die ("ERROR: cannot open nodeInfoFileOut: $nodeInfoFileOut\n");
     foreach my $clusterID (keys %{$clusters}) {
-	print OUT "$clusterID\t${$clusterLabels}{$clusterID}\t${$nodeScores}{$clusterID}\t${$edgeScores}{$clusterID}\t";
+	print OUT "$clusterID\t${$clusterLabels}{$clusterID}\t${$nodeScores}{$clusterID}\t";
 	my $cuisString = '';
 	foreach my $cui (@{${$clusters}{$clusterID}}) {
 	    $cuisString .= "$cui,";
@@ -84,9 +126,9 @@ sub Main {
 	print OUT $cuisString;
 	print OUT "\n";
     }
-
-    print STDERR "Done\n";
 }
+
+
 
 
 
@@ -121,20 +163,20 @@ sub calculateScores_sumOfLeafNodes {
 # Input:  $nodeScoresRef - a hash ref of nodes and their scores ($nodes{$id}=$score)
 #         $clusters- a hash ref of clusters and their cuis ($clusters{id}=@cuis)
 #         $parentFile - the file containing the parent list of the hierarchy
-# Output: \%clusterScores - a hash ref containing scores of each cluster ($clusterScores{$id}=$score)
-sub calculateScores_sumOfDescendantNodes {
+# Output: \%scores - a hash ref containing scores of each cluster ($clusterScores{$id}=$score)
+sub calculateScores_sumOfDescendantScores {
     my ($nodeScoresRef, $clusters, $parentFile) = (@_);	
 
-    #get a list of all descendant nodes
+    #get a children list, which is a list of direct children of a node
     my $childrenListRef = &extractChildrenList($parentFile);
 
     #score each cluster as the sum of its descendant node scores
-    my %cluster_scores;
+    my %scores;
     foreach my $clusterIndex (keys %$clusters){
 	#recursively find the score
-	$cluster_scores{$clusterIndex}  = &sumDescendantScores($clusterIndex, $nodeScoresRef, $childrenListRef);
+	$scores{$clusterIndex} = &sumDescendantScores($clusterIndex, $nodeScoresRef, $childrenListRef); 
     }
-    return \%cluster_scores;
+    return \%scores;
 }
 
 # Recursively sums all descendant scores of a node
@@ -149,11 +191,10 @@ sub sumDescendantScores {
 
     #sum the score of all descendants recursively
     my $score = 0;
-    foreach my $childrenArray (keys ${$childrenListRef}{$nodeID}) {
-	foreach my $childID (@{$childrenArray}) {
-	    $score += ${$nodeScoresRef}{$childID};
-	    $score += &sumDescendantScores($childID, $nodeScoresRef, $childrenListRef);
-	}
+    my $childrenArrayRef = ${$childrenListRef}{$nodeID}; #list of children of this node
+    foreach my $childID (@{$childrenArrayRef}) {
+	$score += ${$nodeScoresRef}{$childID};
+	$score += &sumDescendantScores($childID, $nodeScoresRef, $childrenListRef);
     }
 
     return $score;
@@ -170,18 +211,25 @@ sub calculateScores_setAssociation {
     my $aTermsRef = shift;
     my $measure = shift;
     my $cooccurrenceMatrix = shift;
-    
+  
     #initialize UMLS::Association
     my %tHash = ();
     $tHash{'t'} = 1; #default hash values are with t=1 (silence module output)
     $tHash{'vsa'} = 1; #always use overlapping B sets association, since it is implicit
     $tHash{'matrix'} = $cooccurrenceMatrix;
     $tHash{'noOrder'} = 1;
+
+    #Used if a DB in required on willow
+    #$tHash{'database'} = 'CUI_Bigram';
+    #$tHash{"measure"} = $measure;
+    #$tHash{'hostname'} = '192.168.24.89';
+    #$tHash{'username'} = 'henryst';
+    #$tHash{'password'} = 'OhFaht3eique';
+    #$tHash{'socket'} = '/var/run/mysqld.sock';
+
     my $componentOptions = \%tHash;
     my $association = UMLS::Association->new($componentOptions) or 
 	die "Error: Unable to create UMLS::Association object.\n";
-    #TODO - options{'uml'} = interface; (is that needed?)
-
 
     #create set pair lists for a to all nodes in the dataset
     # the set pair list is what is passed to UMLS::Association
@@ -554,17 +602,18 @@ sub printVClusterInputFile {
 #         $matrix_size - array ref of the dimensions of the vector file (rows, cols)
 # Output: $clusters_filename - the file name the cluserting solution was output to
 sub runVCluster {
-    my ($output_dir, $tree_filename, $vclusterLocation, $v_ifile, $cl_method, $matrix_size) = (@_);
+    my ($output_dir, $vclusterLocation, $v_ifile, $cl_method, $matrix_size) = (@_);
 
     #We want a cluster tree where each leaf node is a vector
     # thereby creating a full cluster tree. SO num_clusters = num_vectors
     my $num_vectors = @$matrix_size[0];
     my $num_clusters = $num_vectors;
+    print STDERR "----------NUM_VECTORS = $num_vectors\n";  #TODO - delete 
 
     #create file names
     my $file_to_cluster = $output_dir.$v_ifile;
     my $clusters_filename = $file_to_cluster.'.clusters';
-    #my $tree_filename =  $file_to_cluster.'.tree';
+    my $tree_filename =  $file_to_cluster.'.tree';
     my $labels_filename = $file_to_cluster.'labels';
 
     #NOTE: the labeltree option labels with a set of features, not a single name
@@ -574,7 +623,7 @@ sub runVCluster {
     print "$cmd\n";
     my $cluster_cmd = `$cmd`;
 
-    return $clusters_filename;
+    return $clusters_filename, $tree_filename;
 }
 
 
@@ -596,9 +645,9 @@ sub getArgs {
     my $assocMeasure = $ARGV[4];
     my $cooccurrenceMatrix = $ARGV[5];
     my $outputDir = $ARGV[6];
-    my $parentArrayOut = $ARGV[7];
-    my $clustersFileOut = $ARGV[8];
-  
+    my $nodeInfoFileOut = $ARGV[7];
+    my $edgeInfoFileOut = $ARGV[8];
+ 
     #check the input args
     &checkNumArgs();
     &checkVcluster($vclusterLocation);
@@ -608,13 +657,13 @@ sub getArgs {
     &checkFileErr($lbdFile);
     &checkFileErr($vectorFile);
     &createDir($outputDir);
-    $parentArrayOut = $outputDir.$parentArrayOut;
-    &checkCreateFileErr($parentArrayOut);
-    $clustersFileOut = $outputDir.$clustersFileOut;
-    &checkCreateFileErr($clustersFileOut);
+    $nodeInfoFileOut = $outputDir.$nodeInfoFileOut;
+    &checkCreateFileErr($nodeInfoFileOut);
+    $edgeInfoFileOut = $outputDir.$edgeInfoFileOut;
+    &checkCreateFileErr($edgeInfoFileOut);
 
     #return the input arguments
-    return $vclusterLocation, $lbdFile, $vectorFile, $clMethod, $assocMeasure, $cooccurrenceMatrix, $outputDir, $parentArrayOut, $clustersFileOut;
+    return $vclusterLocation, $lbdFile, $vectorFile, $clMethod, $assocMeasure, $cooccurrenceMatrix, $outputDir, $nodeInfoFileOut, $edgeInfoFileOut;
 }
 
 
@@ -624,7 +673,7 @@ sub getArgs {
 sub checkNumArgs {
     if ($#ARGV != 8) {
 	print "Incorrect number of arguments. Program requires 9 arguments to run.\n";
-	print "Usage: perl DiscoveryReplication.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [assocMeasure] [cooccurrenceMatrix] [outDir] [parentArrayOut] [clustersFileOut]\n";
+	print "Usage: perl DiscoveryReplication.pl [vclusterLocation] [lbdFile] [vectorFile] [clMethod] [assocMeasure] [cooccurrenceMatrix] [outDir] [nodeInfoFileOut] [edgeInfoFileOut]\n";
 	exit;
     }
 }

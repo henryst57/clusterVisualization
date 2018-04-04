@@ -1,13 +1,16 @@
 # gets Cui Info including:
 # CUI, preferred term, semantic type(s), semantic group(s)
 # each cui info is on a new line
+#
+# Usage: perl getCuiInfo.pl [nodeInfoFile] [cuiInfoOutFile]
+# Example: perl getCuiInfo.pl RayFish_nodeInfo RayFish_cuiInfo
 use strict;
 use warnings;
 use UMLS::Interface;
 
 
 #user input
-my $clustersFile = shift;
+my $nodeInfoFile = shift;
 my $outFile = shift;
 
 
@@ -18,6 +21,12 @@ my $outFile = shift;
 #initialize UMLS::Interface
 my %tHash = ();
 $tHash{'t'} = 1; #default hash values are with t=1 (silence module output)
+
+$tHash{'hostname'} = '192.168.24.89';
+$tHash{'username'} = 'henryst';
+$tHash{'password'} = 'OhFaht3eique';
+$tHash{'socket'} = '/var/run/mysqld.sock';
+
 my $componentOptions = \%tHash;
 #add more component options here (if needed)
 #else use default configuration
@@ -27,13 +36,14 @@ my $umls = UMLS::Interface->new($componentOptions)
 ########
 #read in all cuis from the cui file
 my %cuis = ();
-open IN, $clustersFile or die ("ERROR: cannot open clustersFile: $clustersFile"); 
+open IN, $nodeInfoFile or die ("ERROR: cannot open nodeInfoFile: $nodeInfoFile"); 
 while (my $line = <IN>) {
     while ($line =~ /(C\d{7})/) {
 	$cuis{$1} = 1;
     }
 }
 close IN;
+
 
 ########
 # get all preferred terms for all cuis
@@ -50,8 +60,6 @@ foreach my $cui(keys %cuis) {
     #save the preferred term
     $preferredTerm{$cui} = $preferredTermString;
 }
-
-
 
 ########
 # get semantic types for all cuis
@@ -75,7 +83,6 @@ foreach my $cui (keys %cuis) {
     $semanticType{$cui} = $semanticTypeString;
 }
 
-
 ########
 # get semantic groups of each semantic type
 my %semanticGroup = ();
@@ -98,7 +105,6 @@ foreach my $cui (keys %semanticType) {
 	}
     }
 }
-
 
 ########
 # Output the results
