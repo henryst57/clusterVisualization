@@ -1,9 +1,19 @@
-# gets Cui Info including:
+# Gets information about CUIs in a NodeInfo file including:
+#
 # CUI, preferred term, semantic type(s), semantic group(s)
-# each cui info is on a new line
+#
+# Thoutput file contains these values tab seperated, if there are multiple
+# answers for a value (e.g. multiple semantic groups) then those answers are 
+# comma seperated. Info about each CUI is on a single line.
+#
+# Example Output:
+# C0000545    Fish Oil   T047,T053     DYSN     
+#
+#  TODO - update example above to make sure it is correct/accurate
 #
 # Usage: perl getCuiInfo.pl [nodeInfoFile] [cuiInfoOutFile]
 # Example: perl getCuiInfo.pl RayFish_nodeInfo RayFish_cuiInfo
+#
 use strict;
 use warnings;
 use UMLS::Interface;
