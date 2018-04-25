@@ -25,7 +25,6 @@
 #
 #
 #TODO - vector file format?  well its word2vec format
-#TODO - finalize doucmentation (methods are done, but how to use should be documented more)
 use strict;
 use warnings;
 
@@ -113,7 +112,6 @@ sub outputResults {
     }
     close OUT;
 
-
     # print out the node (cluster) info: clusterID \t clusterLabel \t clusterWeigt \t cuisInCluster
     open OUT, ">$nodeInfoFileOut" or die ("ERROR: cannot open nodeInfoFileOut: $nodeInfoFileOut\n");
     foreach my $clusterID (keys %{$clusters}) {
@@ -174,7 +172,14 @@ sub calculateScores_sumOfDescendantScores {
     my %scores;
     foreach my $clusterIndex (keys %$clusters){
 	#recursively find the score
-	$scores{$clusterIndex} = &sumDescendantScores($clusterIndex, $nodeScoresRef, $childrenListRef); 
+	(my $descendantScores, my $descendantCount) 
+	    = &sumDescendantScores($clusterIndex, $nodeScoresRef, $childrenListRef); 
+
+	#score is sum of descendant scores + this nodes score
+	$scores{$clusterIndex} = ${$nodeScoresRef}{$clusterIndex} + $descendantScores;
+
+	#TODO - keep average?
+	#$scores{$clusterIndex} /= ($descendantCount+1)
     }
     return \%scores;
 }
@@ -191,13 +196,21 @@ sub sumDescendantScores {
 
     #sum the score of all descendants recursively
     my $score = 0;
+    my $count = 0;
     my $childrenArrayRef = ${$childrenListRef}{$nodeID}; #list of children of this node
     foreach my $childID (@{$childrenArrayRef}) {
+	#increment score and count for this node
 	$score += ${$nodeScoresRef}{$childID};
-	$score += &sumDescendantScores($childID, $nodeScoresRef, $childrenListRef);
+	$count++;
+
+	#increment score and count for all descendant nodes
+	(my $descendantsScore, my $descendantsCount) 
+	    = &sumDescendantScores($childID, $nodeScoresRef, $childrenListRef);
+	$score += $descendantsScore;
+	$count += $descendantsCount;
     }
 
-    return $score;
+    return ($score, $count);
 }
 
 
