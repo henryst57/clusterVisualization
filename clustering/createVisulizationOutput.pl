@@ -28,7 +28,7 @@
 use strict;
 use warnings;
 
-use lib '/home/henryst/associationMatrix/UMLS-Assoc_new/UMLS-Association/lib';
+use lib '/home/henryst/UMLS-Association/lib';
 use UMLS::Association;
 
 
@@ -230,7 +230,7 @@ sub calculateScores_setAssociation {
     $tHash{'t'} = 1; #default hash values are with t=1 (silence module output)
     $tHash{'vsa'} = 1; #always use overlapping B sets association, since it is implicit
     $tHash{'matrix'} = $cooccurrenceMatrix;
-    $tHash{'noOrder'} = 1;
+    $tHash{'noOrder'} = 0;
 
     #Used if a DB in required on willow
     #$tHash{'database'} = 'CUI_Bigram';

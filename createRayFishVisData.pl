@@ -17,7 +17,7 @@ my $assocMeasure = 'x2';
 my $assocMatrix = '../data/discoveryRep/1983_1985_window8.matrix';
 
 #ouput params
-my $outputDir = '/home/henryst/clusterVis/output/rayFish_threshold3000_new/';
+my $outputDir = '/home/henryst/clusterVisualization/output/rayFish_threshold3000_lsa/';
 my $nodeInfoFileOut = 'RayFish_nodeInfo';
 my $edgeInfoFileOut = 'RayFish_edgeInfo';
 my $cuiInfoFileOut = 'RayFish_cuiInfo';
